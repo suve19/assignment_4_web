@@ -1,0 +1,58 @@
+**** README ****
+Supporting files for np_assignment4_web assignment.
+Patrik.Arlos@bth.se (2021/2022)
+
+This contains the base files for the Web performance assignment.
+
+Files
+* serverfork.cpp	- Fork server base.
+* serverthread.cpp	- Thread server base
+* Makefile		- Build both solutions
+* dcollect.sh		- Bash script to collect statistical data to be used in report.
+* dcollect.p		- GNUplot used to generate graph, used by dcollect.sh
+
+The dcollect.sh and dcollect.p are to be used to collect the data that you will use in your report.
+They will also be used to test that your solutions works.
+
+The script, dcollect.sh, has three relevant variables; portFORK, portTHREAD and testing.
+portFORK and portTHREAD are to match the port number where your servers are listening too. 
+We use testing to determine if the script runs in a test mode, or in the real data collection mode.
+The difference is in the amount of data that is collected. In the real mode it will collect
+60*32 samples, while in test mode only 5*10 samples. Note that your submission should of course be
+using the real mode.
+
+dcollect.sh does a couple of important tasks.
+ 1) Verify that your servers can serve basic content. This is done by sending a random string into
+    the file randomFile. Then it verifies that it can download this file from your server, using CURL.
+    Hence, your server needs to be good enough that CURL can work with it. If this fails, the script
+    exits with an 'ERROR' statement.
+ 2) Verifies that your server can serve any file. This is done by creating a randomly name file
+    in the same folder as the script, and servers, are executing. It then again uses CURL to verify
+    that it can download that randomly named file, from your servers. If it can, the scrip exits with
+    an 'ERROR' statement.
+ 3) Collects data, calculates statistics, and renders a graph (statistics.png) regarding performance.
+    As mentioned before there are two modes, testing (testing=1) and real (testing=0).
+    If there are any problems during the data collection, the scrip exits with an 'ERROR' statment.
+
+If the script works, and no problems were encountered the script will print
+   "SUMMARY: Did it work?"
+This only tells us that the script completed it execution, and it was NOT aborted due to some errors.
+At that point I recommend that you investigate the generated graph, statistics.png. That the script
+completed, is NOT an garantee that you will pass the assignment. If the script exits with an 'ERROR'
+statement, that is a garantee that you will NOT pass. So, you better fix the issue. 
+
+
+If you just want to test HOW the dcollect.sh works, you can use 'php' to run a small webserver
+in a specific folder. Just start it as;
+
+   host:~/$ php -S 127.0.0.0:<port>
+
+Replace <port> with the port you want it too listen to. As the script expects both servers to be
+operational you need to start two separate instances, on different ports.
+
+For a point of reference, it took my host approximately 23 minutes to collect all the raw data, and
+it took 40s to collect the test data. My host is a AMD Ryzen 5950x, 64Gbyte of RAM and 1Tbyte NVMe storage. 
+
+
+
+
