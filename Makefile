@@ -18,4 +18,4 @@ serverthread: serverthread.o
 
 
 clean:
-	rm *.o *.a serverfork serverthread
+	rm *.o *.a perf_*.txt  tmp.* serverfork serverthread
