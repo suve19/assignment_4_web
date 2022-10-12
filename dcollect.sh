@@ -5,7 +5,8 @@ portFORK=8282
 portTHREAD=8283
 testing=1
 
-
+head -c 10000 < /dev/urandom > big
+head -c 1000 < /dev/urandom > small 
 
 if [[ "$testing" == "0" ]]; then
     ## Use for Data collection
