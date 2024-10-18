@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <string.h>
 
 #define BACKLOG 10
@@ -83,7 +84,33 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        printf("Method: %s, URL: %s\n", method, url);
+        // Determine the requested file
+        char file_path[256];
+        if (strcmp(url, "/") == 0) {
+            strcpy(file_path, "./index.html");  // Serve index.html by default
+        } else {
+            snprintf(file_path, sizeof(file_path), ".%s", url);
+        }
+
+        // Open and serve the file
+        int file_fd = open(file_path, O_RDONLY);
+        if (file_fd < 0) {
+            const char *not_found = "HTTP/1.1 404 Not Found\r\n\r\n";
+            send(client_fd, not_found, strlen(not_found), 0);
+        } else {
+            const char *ok_response = "HTTP/1.1 200 OK\r\n\r\n";
+            send(client_fd, ok_response, strlen(ok_response), 0);
+
+            if (strcmp(method, "GET") == 0) {
+                char file_buffer[BUFFER_SIZE];
+                int read_bytes;
+                while ((read_bytes = read(file_fd, file_buffer, sizeof(file_buffer))) > 0) {
+                    send(client_fd, file_buffer, read_bytes, 0);
+                }
+            }
+
+            close(file_fd);
+        }
 
         close(client_fd);
     }
