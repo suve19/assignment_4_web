@@ -70,11 +70,18 @@ int main(int argc, char *argv[]) {
         }
 
         buffer[bytes_received] = '\0';
-        printf("Received request:\n%s\n", buffer);
 
         // Basic parsing of the request
         char method[16], url[256];
         sscanf(buffer, "%s %s", method, url);
+
+        // Handle only GET and HEAD methods
+        if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0) {
+            const char *not_implemented = "HTTP/1.1 501 Not Implemented\r\n\r\n";
+            send(client_fd, not_implemented, strlen(not_implemented), 0);
+            close(client_fd);
+            continue;
+        }
 
         printf("Method: %s, URL: %s\n", method, url);
 
