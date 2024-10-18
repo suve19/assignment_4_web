@@ -8,6 +8,7 @@
 #include <string.h>
 
 #define BACKLOG 10
+#define BUFFER_SIZE 1024
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -18,8 +19,9 @@ int main(int argc, char *argv[]) {
     const char *ip_address = argv[1];
     int port = atoi(argv[2]);
 
-    int server_fd;
-    struct sockaddr_in server_addr;
+    int server_fd, client_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t sin_size;
 
     // Create the socket
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -48,6 +50,36 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Server is running on %s:%d\n", ip_address, port);
+
+    while (1) {
+        sin_size = sizeof(struct sockaddr_in);
+        if ((client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &sin_size)) == -1) {
+            perror("accept");
+            continue;
+        }
+
+        printf("Server: got connection from %s\n", inet_ntoa(client_addr.sin_addr));
+
+        // Receive and parse request
+        char buffer[BUFFER_SIZE];
+        int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received < 0) {
+            perror("recv");
+            close(client_fd);
+            continue;
+        }
+
+        buffer[bytes_received] = '\0';
+        printf("Received request:\n%s\n", buffer);
+
+        // Basic parsing of the request
+        char method[16], url[256];
+        sscanf(buffer, "%s %s", method, url);
+
+        printf("Method: %s, URL: %s\n", method, url);
+
+        close(client_fd);
+    }
 
     close(server_fd);
     return 0;
