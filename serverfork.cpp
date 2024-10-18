@@ -76,6 +76,20 @@ int main(int argc, char *argv[]) {
         char method[16], url[256];
         sscanf(buffer, "%s %s", method, url);
 
+        // Reject URLs with more than three slashes
+        size_t slash_count = 0;
+        for (size_t i = 0; i < strlen(url); i++) {
+            if (url[i] == '/') {
+                slash_count++;
+            }
+        }
+        if (slash_count > 3) {
+            const char *error_message = "HTTP/1.1 403 Forbidden\r\n\r\n";
+            send(client_fd, error_message, strlen(error_message), 0);
+            close(client_fd);
+            continue;
+        }
+
         // Handle only GET and HEAD methods
         if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0) {
             const char *not_implemented = "HTTP/1.1 501 Not Implemented\r\n\r\n";
