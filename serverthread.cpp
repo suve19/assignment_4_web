@@ -6,8 +6,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <pthread.h>
 
 #define BACKLOG 10
+#define MAX_THREADS 8  // Number of threads in the pool
+
+void *handle_client(void *arg) {
+    // Placeholder for handling client requests
+    return NULL;
+}
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -55,6 +62,27 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Server is running on %s:%d\n", ip_address, port);
+
+    // Create a pool of worker threads
+    pthread_t thread_pool[MAX_THREADS];
+    for (int i = 0; i < MAX_THREADS; i++) {
+        pthread_create(&thread_pool[i], NULL, handle_client, NULL);
+    }
+
+    // Server loop: Continuously accept and process incoming connections
+    while (1) {
+        int client_fd;
+        socklen_t addr_size;
+        struct sockaddr_storage client_addr;
+
+        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
+        if (client_fd == -1) {
+            perror("accept");
+            continue;
+        }
+
+        // Placeholder for handling the client connection
+    }
 
     close(server_fd);
     return 0;
