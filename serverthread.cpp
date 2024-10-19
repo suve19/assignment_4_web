@@ -10,6 +10,60 @@
 
 #define BACKLOG 10
 #define MAX_THREADS 8  // Number of threads in the pool
+#define QUEUE_SIZE 512 // Size of the task queue
+
+// Structure to hold client information for threading
+typedef struct {
+    int client_fd;
+    struct sockaddr_storage client_addr;
+} client_info_t;
+
+// Task queue structure
+typedef struct {
+    client_info_t *client_tasks[QUEUE_SIZE];
+    int front;
+    int rear;
+    int count;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+} task_queue_t;
+
+task_queue_t queue;
+
+void init_task_queue() {
+    queue.front = 0;
+    queue.rear = 0;
+    queue.count = 0;
+    pthread_mutex_init(&queue.lock, NULL);
+    pthread_cond_init(&queue.cond, NULL);
+}
+
+void enqueue_task(client_info_t *client_info) {
+    pthread_mutex_lock(&queue.lock);
+    if (queue.count < QUEUE_SIZE) {
+        queue.client_tasks[queue.rear] = client_info;
+        queue.rear = (queue.rear + 1) % QUEUE_SIZE;
+        queue.count++;
+        pthread_cond_signal(&queue.cond);
+    } else {
+        // If queue is full, reject the connection
+        close(client_info->client_fd);
+        free(client_info);
+    }
+    pthread_mutex_unlock(&queue.lock);
+}
+
+client_info_t *dequeue_task() {
+    pthread_mutex_lock(&queue.lock);
+    while (queue.count == 0) {
+        pthread_cond_wait(&queue.cond, &queue.lock);
+    }
+    client_info_t *task = queue.client_tasks[queue.front];
+    queue.front = (queue.front + 1) % QUEUE_SIZE;
+    queue.count--;
+    pthread_mutex_unlock(&queue.lock);
+    return task;
+}
 
 void *handle_client(void *arg) {
     // Placeholder for handling client requests
@@ -63,6 +117,9 @@ int main(int argc, char *argv[]) {
 
     printf("Server is running on %s:%d\n", ip_address, port);
 
+    // Initialize the task queue
+    init_task_queue();
+
     // Create a pool of worker threads
     pthread_t thread_pool[MAX_THREADS];
     for (int i = 0; i < MAX_THREADS; i++) {
@@ -71,17 +128,22 @@ int main(int argc, char *argv[]) {
 
     // Server loop: Continuously accept and process incoming connections
     while (1) {
-        int client_fd;
-        socklen_t addr_size;
-        struct sockaddr_storage client_addr;
-
-        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
-        if (client_fd == -1) {
-            perror("accept");
+        client_info_t *client_info = (client_info_t *)malloc(sizeof(client_info_t));
+        if (!client_info) {
+            perror("malloc");
             continue;
         }
 
-        // Placeholder for handling the client connection
+        socklen_t addr_size = sizeof(client_info->client_addr);
+        client_info->client_fd = accept(server_fd, (struct sockaddr *)&client_info->client_addr, &addr_size);
+        if (client_info->client_fd == -1) {
+            perror("accept");
+            free(client_info);
+            continue;
+        }
+
+        // Enqueue the task for the thread pool to process
+        enqueue_task(client_info);
     }
 
     close(server_fd);
