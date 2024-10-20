@@ -10,7 +10,7 @@
 
 #define BACKLOG 10
 #define MAX_THREADS 8  // Number of threads in the pool
-#define QUEUE_SIZE 512 // Size of the task queue
+#define QUEUE_SIZE 1024 // Size of the task queue
 #define BUFFER_SIZE 8192
 
 // Structure to hold client information for threading
@@ -94,7 +94,7 @@ void *handle_client(void *arg) {
             }
         }
         if (slash_count > 3) {
-            const char *error_message = "HTTP/1.1 403 Forbidden\r\n\r\n";
+            const char *error_message = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
             send(client_fd, error_message, strlen(error_message), 0);
             close(client_fd);
             free(client_info);
@@ -103,17 +103,47 @@ void *handle_client(void *arg) {
 
         // Handle only GET and HEAD methods
         if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0) {
-            const char *not_implemented = "HTTP/1.1 501 Not Implemented\r\n\r\n";
+            const char *not_implemented = "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n";
             send(client_fd, not_implemented, strlen(not_implemented), 0);
             close(client_fd);
             free(client_info);
             continue;
         }
 
-        // [Rest of the code for handling GET and HEAD requests]
+        // Determine the file path
+        char file_path[256];
+        if (strcmp(url, "/") == 0) {
+            strcpy(file_path, "./index.html"); // Serve index.html for root request
+        } else {
+            snprintf(file_path, sizeof(file_path), ".%s", url);
+        }
+
+        // Open and serve the file
+        FILE *file = fopen(file_path, "r");
+        if (!file) {
+            const char *not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+            send(client_fd, not_found, strlen(not_found), 0);
+        } else {
+            const char *ok_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+            send(client_fd, ok_response, strlen(ok_response), 0);
+
+            // Only send file content for GET requests
+            if (strcmp(method, "GET") == 0) {
+                char file_buffer[BUFFER_SIZE];
+                size_t read_bytes;
+                while ((read_bytes = fread(file_buffer, 1, sizeof(file_buffer), file)) > 0) {
+                    send(client_fd, file_buffer, read_bytes, 0);
+                }
+            }
+            fclose(file);
+        }
+
+        close(client_fd);
+        free(client_info);
     }
     return NULL;
 }
+
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
