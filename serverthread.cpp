@@ -7,11 +7,15 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 #define BACKLOG 10
 #define MAX_THREADS 8  // Number of threads in the pool
 #define QUEUE_SIZE 1024 // Size of the task queue
 #define BUFFER_SIZE 8192
+
+// Declare the semaphore globally
+sem_t queue_sem; 
 
 // Structure to hold client information for threading
 typedef struct {
@@ -37,19 +41,18 @@ void init_task_queue() {
     queue.count = 0;
     pthread_mutex_init(&queue.lock, NULL);
     pthread_cond_init(&queue.cond, NULL);
+    sem_init(&queue_sem, 0, QUEUE_SIZE);  // Initialize semaphore with queue size
 }
 
 void enqueue_task(client_info_t *client_info) {
+    sem_wait(&queue_sem);  // Wait if the queue is full
+
     pthread_mutex_lock(&queue.lock);
     if (queue.count < QUEUE_SIZE) {
         queue.client_tasks[queue.rear] = client_info;
         queue.rear = (queue.rear + 1) % QUEUE_SIZE;
         queue.count++;
-        pthread_cond_signal(&queue.cond);
-    } else {
-        // If queue is full, reject the connection
-        close(client_info->client_fd);
-        free(client_info);
+        pthread_cond_signal(&queue.cond);  // Signal that a task has been enqueued
     }
     pthread_mutex_unlock(&queue.lock);
 }
@@ -57,12 +60,14 @@ void enqueue_task(client_info_t *client_info) {
 client_info_t *dequeue_task() {
     pthread_mutex_lock(&queue.lock);
     while (queue.count == 0) {
-        pthread_cond_wait(&queue.cond, &queue.lock);
+        pthread_cond_wait(&queue.cond, &queue.lock);  // Wait for tasks to be available
     }
     client_info_t *task = queue.client_tasks[queue.front];
     queue.front = (queue.front + 1) % QUEUE_SIZE;
     queue.count--;
     pthread_mutex_unlock(&queue.lock);
+
+    sem_post(&queue_sem);  // Signal that a slot in the queue has been freed
     return task;
 }
 
@@ -78,9 +83,15 @@ void *handle_client(void *arg) {
             close(client_fd);
             free(client_info);
             continue;
+        } else if (bytes_received == 0) {
+            // Client closed connection
+            close(client_fd);
+            free(client_info);
+            continue;
         }
 
         buffer[bytes_received] = '\0';
+        // printf("Received request: %s\n", buffer);  // Log received request
 
         // Parse request method and URL
         char method[16], url[256];
@@ -143,7 +154,6 @@ void *handle_client(void *arg) {
     }
     return NULL;
 }
-
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -216,6 +226,8 @@ int main(int argc, char *argv[]) {
             free(client_info);
             continue;
         }
+
+        // printf("Accepted new connection: fd=%d\n", client_info->client_fd);  // Log accepted connection
 
         // Enqueue the task for the thread pool to process
         enqueue_task(client_info);
