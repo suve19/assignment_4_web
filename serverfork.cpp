@@ -7,9 +7,18 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/wait.h> 
 
 #define BACKLOG 10  // Maximum number of pending connections in the queue
 #define BUFFER_SIZE 1024  // Size of the buffer to store received data
+
+/**
+ * Signal handler to reap zombie child processes.
+ */
+void sigchld_handler(int s) {
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
 
 /**
  * Main function: Starts the HTTP server, listens for incoming connections, and serves requested files.
@@ -32,6 +41,7 @@ int main(int argc, char *argv[]) {
     int server_fd, client_fd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t sin_size;
+    struct sigaction sa;  // For handling zombie child processes
 
     // Create the server socket
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -56,6 +66,15 @@ int main(int argc, char *argv[]) {
     if (listen(server_fd, BACKLOG) == -1) {
         perror("listen");
         close(server_fd);
+        exit(EXIT_FAILURE);
+    }
+
+    // Reap zombie child processes automatically
+    sa.sa_handler = sigchld_handler;  // Handle SIGCHLD signal
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+        perror("sigaction");
         exit(EXIT_FAILURE);
     }
 
