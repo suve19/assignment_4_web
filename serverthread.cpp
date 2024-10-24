@@ -12,7 +12,7 @@
 #define BACKLOG 10
 #define MAX_THREADS 8  // Number of threads in the pool
 #define QUEUE_SIZE 1024 // Size of the task queue
-#define BUFFER_SIZE 8192
+#define BUFFER_SIZE 1024
 
 // Declare the semaphore globally
 sem_t queue_sem; 
@@ -96,15 +96,15 @@ void *handle_client(void *arg) {
         // Parse request method and URL
         char method[16], url[256];
         sscanf(buffer, "%s %s", method, url);
-
-        // Reject URLs with more than 3 slashes
+        // printf("%s", buffer);
+        // Reject URLs with more than 1 slashes as 2 slashes are already in the http://host:port .So We need to check if slashes more than 1. 
         size_t slash_count = 0;
         for (size_t i = 0; i < strlen(url); i++) {
             if (url[i] == '/') {
                 slash_count++;
             }
         }
-        if (slash_count > 3) {
+        if (slash_count > 1) {
             const char *error_message = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
             send(client_fd, error_message, strlen(error_message), 0);
             close(client_fd);
@@ -122,12 +122,8 @@ void *handle_client(void *arg) {
         }
 
         // Determine the file path
-        char file_path[256];
-        if (strcmp(url, "/") == 0) {
-            strcpy(file_path, "./index.html"); // Serve index.html for root request
-        } else {
-            snprintf(file_path, sizeof(file_path), ".%s", url);
-        }
+        char file_path[512];
+        snprintf(file_path, sizeof(file_path), ".%s", url);
 
         // Open and serve the file
         FILE *file = fopen(file_path, "r");
