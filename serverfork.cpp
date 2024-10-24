@@ -109,14 +109,14 @@ int main(int argc, char *argv[]) {
             char method[16], url[256];
             sscanf(buffer, "%s %s", method, url);
 
-            // Reject requests with URLs containing more than 3 slashes
+             // Reject URLs with more than 1 slashes as 2 slashes are already in the http://host:port .So We need to check if slashes more than 1.
             size_t slash_count = 0;
             for (size_t i = 0; i < strlen(url); i++) {
                 if (url[i] == '/') {
                     slash_count++;
                 }
             }
-            if (slash_count > 3) {
+            if (slash_count > 1) {
                 const char *error_message = "HTTP/1.1 403 Forbidden\r\n\r\n";
                 send(client_fd, error_message, strlen(error_message), 0);
                 close(client_fd);
@@ -132,12 +132,9 @@ int main(int argc, char *argv[]) {
             }
 
             // Determine the requested file path
-            char file_path[256];
-            if (strcmp(url, "/") == 0) {
-                strcpy(file_path, "./index.html");  // Serve index.html for root URL
-            } else {
-                snprintf(file_path, sizeof(file_path), ".%s", url);  // Serve file based on URL path
-            }
+            char file_path[512];
+            
+            snprintf(file_path, sizeof(file_path), ".%s", url);  // Serve file based on URL path
 
             // Attempt to open the requested file
             int file_fd = open(file_path, O_RDONLY);
