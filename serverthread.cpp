@@ -152,15 +152,30 @@ void *handle_client(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <IP> <PORT>\n", argv[0]);
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <IP:PORT>\n", argv[0]);
         return 1;
     }
 
-    const char *ip_address = argv[1];
-    int port = atoi(argv[2]);
-    int server_fd;
+    // Extract IP and Port from the combined "IP:PORT" format
+    char *ip_port = argv[1];
+    char *colon_pos = strchr(ip_port, ':');
+    if (!colon_pos) {
+        fprintf(stderr, "Invalid format. Use IP:PORT format.\n");
+        return 1;
+    }
 
+    // Split the IP and port portions
+    *colon_pos = '\0';
+    const char *ip_address = ip_port;
+    int port = atoi(colon_pos + 1);
+
+    if (port <= 0 || port > 65535) {
+        fprintf(stderr, "Invalid port number.\n");
+        return 1;
+    }
+
+    int server_fd;
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;  // Support both IPv4 and IPv6
@@ -168,7 +183,7 @@ int main(int argc, char *argv[]) {
     hints.ai_flags = AI_PASSIVE;
 
     // Resolve DNS and support both IPv4 and IPv6
-    if (getaddrinfo(ip_address, argv[2], &hints, &res) != 0) {
+    if (getaddrinfo(ip_address, colon_pos + 1, &hints, &res) != 0) {
         perror("getaddrinfo");
         return 1;
     }
