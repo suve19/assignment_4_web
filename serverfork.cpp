@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -10,6 +9,7 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <netdb.h>
 
 #define BACKLOG 10         // Maximum number of pending connections in the queue
 #define BUFFER_SIZE 1024   // Size of the buffer to store received data
@@ -30,71 +30,90 @@ void handle_sigint(int sig) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <IP>:<PORT>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <IP/Hostname>:<PORT>\n", argv[0]);
         return 1;
     }
 
-    // Split the IP and port from the argument
-    char *ip_address = strtok(argv[1], ":");
+    // Split the IP/Hostname and port from the argument
+    char *host = strtok(argv[1], ":");
     char *port_str = strtok(NULL, ":");
-    if (!ip_address || !port_str) {
-        fprintf(stderr, "Invalid format. Expected format: <IP>:<PORT>\n");
+    if (!host || !port_str) {
+        fprintf(stderr, "Invalid format. Expected format: <IP/Hostname>:<PORT>\n");
         return 1;
     }
-    int port = atoi(port_str);
 
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t sin_size;
-    struct sigaction sa;
-
-    // Create the server socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
-
-    // Set the socket option SO_REUSEADDR
+    struct addrinfo hints, *res, *p;
     int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
+
+    // Initialize hints for getaddrinfo()
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;      // Support IPv4 and IPv6
+    hints.ai_socktype = SOCK_STREAM; // TCP socket
+    hints.ai_flags = AI_PASSIVE;     // Use wildcard IP for server
+
+    // Resolve the address and port
+    if (getaddrinfo(host, port_str, &hints, &res) != 0) {
+        perror("getaddrinfo");
+        return 1;
     }
 
-    // Set up server address structure
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(ip_address);
-    server_addr.sin_port = htons(port);
-    memset(&(server_addr.sin_zero), '\0', 8);
+    // Loop through the results to create a socket and bind
+    for (p = res; p != NULL; p = p->ai_next) {
+        if ((server_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("socket");
+            continue;
+        }
 
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
-        perror("bind");
-        close(server_fd);
-        exit(EXIT_FAILURE);
+        // Set socket options
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
+            perror("setsockopt");
+            close(server_fd);
+            continue;
+        }
+
+        // Bind the socket
+        if (bind(server_fd, p->ai_addr, p->ai_addrlen) == -1) {
+            perror("bind");
+            close(server_fd);
+            continue;
+        }
+
+        break; // Successfully bound
     }
+
+    if (p == NULL) {
+        fprintf(stderr, "Failed to bind to any address\n");
+        return 1;
+    }
+
+    freeaddrinfo(res); // Free the address info structure
+
+    printf("Server is running on %s:%s\n", host, port_str);
 
     if (listen(server_fd, BACKLOG) == -1) {
         perror("listen");
         close(server_fd);
-        exit(EXIT_FAILURE);
+        return 1;
     }
 
+    // Set up SIGCHLD handler for reaping child processes
+    struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     if (sigaction(SIGCHLD, &sa, NULL) == -1) {
         perror("sigaction");
-        exit(EXIT_FAILURE);
+        return 1;
     }
 
     // Set up SIGINT handler for clean shutdown
     signal(SIGINT, handle_sigint);
 
-    printf("Server is running on %s:%d\n", ip_address, port);
-
     // Server loop: Continuously accept and handle incoming connections
     while (1) {
-        sin_size = sizeof(struct sockaddr_in);
-        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &sin_size);
+        struct sockaddr_storage client_addr;
+        socklen_t addr_size = sizeof(client_addr);
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
         if (client_fd == -1) {
             perror("accept");
             continue;
