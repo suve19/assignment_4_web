@@ -15,7 +15,7 @@
 #define BUFFER_SIZE 1024
 
 // Declare the semaphore globally
-sem_t queue_sem; 
+sem_t queue_sem;
 
 // Structure to hold client information for threading
 typedef struct {
@@ -76,77 +76,103 @@ void *handle_client(void *arg) {
         client_info_t *client_info = dequeue_task();
         int client_fd = client_info->client_fd;
         char buffer[BUFFER_SIZE];
+        static char partial_buffer[BUFFER_SIZE * 2] = {0};  // Buffer for partial message
+        size_t partial_len = 0;
 
-        int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received < 0) {
-            perror("recv");
-            close(client_fd);
-            free(client_info);
-            continue;
-        } else if (bytes_received == 0) {
-            // Client closed connection
-            close(client_fd);
-            free(client_info);
-            continue;
-        }
-
-        buffer[bytes_received] = '\0';
-        // printf("Received request: %s\n", buffer);  // Log received request
-
-        // Parse request method and URL
-        char method[16], url[256];
-        sscanf(buffer, "%s %s", method, url);
-        // printf("%s", buffer);
-        // Reject URLs with more than 1 slashes as 2 slashes are already in the http://host:port .So We need to check if slashes more than 1. 
-        size_t slash_count = 0;
-        for (size_t i = 0; i < strlen(url); i++) {
-            if (url[i] == '/') {
-                slash_count++;
+        while (1) {
+            int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+            if (bytes_received < 0) {
+                perror("recv");
+                close(client_fd);
+                free(client_info);
+                break;
+            } else if (bytes_received == 0) {
+                // Client closed connection
+                close(client_fd);
+                free(client_info);
+                break;
             }
-        }
-        if (slash_count > 1) {
-            const char *error_message = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
-            send(client_fd, error_message, strlen(error_message), 0);
-            close(client_fd);
-            free(client_info);
-            continue;
-        }
 
-        // Handle only GET and HEAD methods
-        if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0) {
-            const char *not_implemented = "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n";
-            send(client_fd, not_implemented, strlen(not_implemented), 0);
-            close(client_fd);
-            free(client_info);
-            continue;
-        }
+            buffer[bytes_received] = '\0';
 
-        // Determine the file path
-        char file_path[512];
-        snprintf(file_path, sizeof(file_path), ".%s", url);
+            // Append new data to partial_buffer
+            if (partial_len + bytes_received < sizeof(partial_buffer) - 1) {
+                memcpy(partial_buffer + partial_len, buffer, bytes_received + 1);
+                partial_len += bytes_received;
+            } else {
+                // Buffer overflow, reset
+                partial_len = 0;
+                memset(partial_buffer, 0, sizeof(partial_buffer));
+                continue;
+            }
 
-        // Open and serve the file
-        FILE *file = fopen(file_path, "r");
-        if (!file) {
-            const char *not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-            send(client_fd, not_found, strlen(not_found), 0);
-        } else {
-            const char *ok_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-            send(client_fd, ok_response, strlen(ok_response), 0);
+            // Check if we have \r\n in partial_buffer
+            if (strstr(partial_buffer, "\r\n")) {
+                // Full message received
+                // Parse request method and URL
+                char method[16], url[256];
+                sscanf(partial_buffer, "%s %s", method, url);
 
-            // Only send file content for GET requests
-            if (strcmp(method, "GET") == 0) {
-                char file_buffer[BUFFER_SIZE];
-                size_t read_bytes;
-                while ((read_bytes = fread(file_buffer, 1, sizeof(file_buffer), file)) > 0) {
-                    send(client_fd, file_buffer, read_bytes, 0);
+                // Check for URL with more than 1 slash
+                size_t slash_count = 0;
+                for (size_t i = 0; i < strlen(url); i++) {
+                    if (url[i] == '/') {
+                        slash_count++;
+                    }
                 }
-            }
-            fclose(file);
-        }
+                if (slash_count > 1) {
+                    const char *error_message = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
+                    send(client_fd, error_message, strlen(error_message), 0);
+                    close(client_fd);
+                    free(client_info);
+                    partial_len = 0;
+                    memset(partial_buffer, 0, sizeof(partial_buffer));
+                    break;
+                }
 
-        close(client_fd);
-        free(client_info);
+                // Only GET and HEAD methods
+                if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0) {
+                    const char *not_implemented = "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n";
+                    send(client_fd, not_implemented, strlen(not_implemented), 0);
+                    close(client_fd);
+                    free(client_info);
+                    partial_len = 0;
+                    memset(partial_buffer, 0, sizeof(partial_buffer));
+                    break;
+                }
+
+                // Determine file path
+                char file_path[512];
+                snprintf(file_path, sizeof(file_path), ".%s", url);
+
+                FILE *file = fopen(file_path, "r");
+                if (!file) {
+                    const char *not_found = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                    send(client_fd, not_found, strlen(not_found), 0);
+                } else {
+                    const char *ok_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
+                    send(client_fd, ok_response, strlen(ok_response), 0);
+
+                    if (strcmp(method, "GET") == 0) {
+                        char file_buffer[BUFFER_SIZE];
+                        size_t read_bytes;
+                        while ((read_bytes = fread(file_buffer, 1, sizeof(file_buffer), file)) > 0) {
+                            send(client_fd, file_buffer, read_bytes, 0);
+                        }
+                    }
+                    fclose(file);
+                }
+
+                close(client_fd);
+                free(client_info);
+
+                // Reset partial buffer
+                partial_len = 0;
+                memset(partial_buffer, 0, sizeof(partial_buffer));
+                break;
+            }
+            // Otherwise, keep accumulating!
+        }
     }
     return NULL;
 }
@@ -157,7 +183,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Extract IP and Port from the combined "IP:PORT" format
     char *ip_port = argv[1];
     char *colon_pos = strchr(ip_port, ':');
     if (!colon_pos) {
@@ -165,7 +190,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Split the IP and port portions
     *colon_pos = '\0';
     const char *ip_address = ip_port;
     int port = atoi(colon_pos + 1);
@@ -178,24 +202,21 @@ int main(int argc, char *argv[]) {
     int server_fd;
     struct addrinfo hints, *res;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;  // Support both IPv4 and IPv6
+    hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    // Resolve DNS and support both IPv4 and IPv6
     if (getaddrinfo(ip_address, colon_pos + 1, &hints, &res) != 0) {
         perror("getaddrinfo");
         return 1;
     }
 
-    // Create the server socket
     if ((server_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
         perror("socket");
         freeaddrinfo(res);
         exit(EXIT_FAILURE);
     }
 
-    // Bind the socket
     if (bind(server_fd, res->ai_addr, res->ai_addrlen) == -1) {
         perror("bind");
         close(server_fd);
@@ -204,7 +225,6 @@ int main(int argc, char *argv[]) {
     }
     freeaddrinfo(res);
 
-    // Start listening for incoming connections
     if (listen(server_fd, BACKLOG) == -1) {
         perror("listen");
         close(server_fd);
@@ -213,16 +233,13 @@ int main(int argc, char *argv[]) {
 
     printf("Server is running on %s:%d\n", ip_address, port);
 
-    // Initialize the task queue
     init_task_queue();
 
-    // Create a pool of worker threads
     pthread_t thread_pool[MAX_THREADS];
     for (int i = 0; i < MAX_THREADS; i++) {
         pthread_create(&thread_pool[i], NULL, handle_client, NULL);
     }
 
-    // Server loop: Continuously accept and process incoming connections
     while (1) {
         client_info_t *client_info = (client_info_t *)malloc(sizeof(client_info_t));
         if (!client_info) {
@@ -238,9 +255,6 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        // printf("Accepted new connection: fd=%d\n", client_info->client_fd);  // Log accepted connection
-
-        // Enqueue the task for the thread pool to process
         enqueue_task(client_info);
     }
 

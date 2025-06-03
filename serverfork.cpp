@@ -11,21 +11,20 @@
 #include <sys/wait.h>
 #include <netdb.h>
 
-#define BACKLOG 10         // Maximum number of pending connections in the queue
-#define BUFFER_SIZE 1024   // Size of the buffer to store received data
+#define BACKLOG 10
+#define BUFFER_SIZE 1024
+#define MAX_HTTP_HEADERS 8192  // Maximum HTTP header size
 
 int server_fd; // Global server socket file descriptor
 
-// Signal handler to reap zombie child processes
 void sigchld_handler(int s) {
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
-// Signal handler for clean shutdown
 void handle_sigint(int sig) {
     printf("Shutting down server...\n");
-    close(server_fd);  // Close the server socket
-    exit(0);  // Exit cleanly
+    close(server_fd);
+    exit(0);
 }
 
 int main(int argc, char *argv[]) {
@@ -34,7 +33,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Split the IP/Hostname and port from the argument
     char *host = strtok(argv[1], ":");
     char *port_str = strtok(NULL, ":");
     if (!host || !port_str) {
@@ -45,40 +43,35 @@ int main(int argc, char *argv[]) {
     struct addrinfo hints, *res, *p;
     int opt = 1;
 
-    // Initialize hints for getaddrinfo()
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;      // Support IPv4 and IPv6
-    hints.ai_socktype = SOCK_STREAM; // TCP socket
-    hints.ai_flags = AI_PASSIVE;     // Use wildcard IP for server
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
 
-    // Resolve the address and port
     if (getaddrinfo(host, port_str, &hints, &res) != 0) {
         perror("getaddrinfo");
         return 1;
     }
 
-    // Loop through the results to create a socket and bind
     for (p = res; p != NULL; p = p->ai_next) {
         if ((server_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("socket");
             continue;
         }
 
-        // Set socket options
         if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
             perror("setsockopt");
             close(server_fd);
             continue;
         }
 
-        // Bind the socket
         if (bind(server_fd, p->ai_addr, p->ai_addrlen) == -1) {
             perror("bind");
             close(server_fd);
             continue;
         }
 
-        break; // Successfully bound
+        break;
     }
 
     if (p == NULL) {
@@ -86,7 +79,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    freeaddrinfo(res); // Free the address info structure
+    freeaddrinfo(res);
 
     printf("Server is running on %s:%s\n", host, port_str);
 
@@ -96,7 +89,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Set up SIGCHLD handler for reaping child processes
     struct sigaction sa;
     sa.sa_handler = sigchld_handler;
     sigemptyset(&sa.sa_mask);
@@ -106,10 +98,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Set up SIGINT handler for clean shutdown
     signal(SIGINT, handle_sigint);
 
-    // Server loop: Continuously accept and handle incoming connections
     while (1) {
         struct sockaddr_storage client_addr;
         socklen_t addr_size = sizeof(client_addr);
@@ -119,22 +109,44 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        if (fork() == 0) {  // Child process
-            close(server_fd);  // Child does not need the listening socket
+        if (fork() == 0) {
+            close(server_fd);
+            
             char buffer[BUFFER_SIZE];
-            int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-            if (bytes_received < 0) {
-                perror("recv");
-                close(client_fd);
-                exit(EXIT_FAILURE);
+            char full_request[MAX_HTTP_HEADERS] = {0};
+            size_t total_received = 0;
+            int message_complete = 0;
+
+            while (!message_complete && total_received < sizeof(full_request) - 1) {
+                int bytes_received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+                if (bytes_received < 0) {
+                    perror("recv");
+                    close(client_fd);
+                    exit(EXIT_FAILURE);
+                } else if (bytes_received == 0) {
+                    close(client_fd);
+                    exit(EXIT_SUCCESS);
+                }
+
+                memcpy(full_request + total_received, buffer, bytes_received);
+                total_received += bytes_received;
+                full_request[total_received] = '\0';
+
+                if (strstr(full_request, "\r\n\r\n") != NULL) {
+                    message_complete = 1;
+                }
             }
 
-            buffer[bytes_received] = '\0';
+            if (!message_complete) {
+                const char *error_message = "HTTP/1.1 413 Payload Too Large\r\n\r\n";
+                send(client_fd, error_message, strlen(error_message), 0);
+                close(client_fd);
+                exit(EXIT_SUCCESS);
+            }
 
             char method[16], url[256];
-            sscanf(buffer, "%s %s", method, url);
+            sscanf(full_request, "%s %s", method, url);
 
-            // Reject URLs with more than 1 slash
             size_t slash_count = 0;
             for (size_t i = 0; i < strlen(url); i++) {
                 if (url[i] == '/') {
@@ -180,7 +192,7 @@ int main(int argc, char *argv[]) {
             exit(EXIT_SUCCESS);
         }
 
-        close(client_fd);  // Parent doesn't need this client socket
+        close(client_fd);
     }
 
     close(server_fd);
