@@ -106,7 +106,7 @@ void *handle_client(void *arg) {
                 continue;
             }
 
-            // Check if we have \r\n in partial_buffer
+            // Check if we have \r\n\r\n in partial_buffer
             if (strstr(partial_buffer, "\r\n\r\n")) {
                 // Full message received
                 // Parse request method and URL
